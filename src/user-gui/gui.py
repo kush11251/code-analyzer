@@ -17,6 +17,7 @@ class TimeFrame(wx.Frame):
         super().__init__(parent=None, title="Code Analyzer")
         self.server_time = server_time
         self.selected_path: Optional[Path] = None
+        self._current_findings: List[Vulnerability] = []
 
         panel = wx.Panel(self)
         main_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -58,20 +59,34 @@ class TimeFrame(wx.Frame):
         results_label = wx.StaticText(panel, label="Analysis results:")
         main_sizer.Add(results_label, 0, wx.LEFT | wx.TOP, 5)
 
-        self.results = wx.TextCtrl(
+        # Table of findings
+        self.results_list = wx.ListCtrl(
+            panel,
+            style=wx.LC_REPORT | wx.BORDER_SUNKEN | wx.LC_SINGLE_SEL,
+        )
+        self.results_list.InsertColumn(0, "Severity", width=90)
+        self.results_list.InsertColumn(1, "Lang", width=80)
+        self.results_list.InsertColumn(2, "Rule", width=80)
+        self.results_list.InsertColumn(3, "File", width=450)
+        self.results_list.InsertColumn(4, "Line", width=70)
+
+        main_sizer.Add(self.results_list, 1, wx.EXPAND | wx.ALL, 5)
+
+        # Detailed view for selected finding
+        self.details = wx.TextCtrl(
             panel,
             style=wx.TE_MULTILINE | wx.TE_READONLY | wx.HSCROLL,
-            size=(800, 400),
+            size=(800, 140),
         )
-        results_font = wx.Font(
+        details_font = wx.Font(
             10,
             wx.FONTFAMILY_TELETYPE,
             wx.FONTSTYLE_NORMAL,
             wx.FONTWEIGHT_NORMAL,
         )
-        self.results.SetFont(results_font)
+        self.details.SetFont(details_font)
 
-        main_sizer.Add(self.results, 1, wx.EXPAND | wx.ALL, 5)
+        main_sizer.Add(self.details, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
         panel.SetSizer(main_sizer)
 
@@ -84,8 +99,9 @@ class TimeFrame(wx.Frame):
         # --- Wire up events ---
         self.select_button.Bind(wx.EVT_BUTTON, self.on_select_folder)
         self.scan_button.Bind(wx.EVT_BUTTON, self.on_scan_clicked)
+        self.results_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_result_selected)
 
-        self.SetSize((900, 600))
+        self.SetSize((900, 650))
         self.Centre()
         self.Show()
 
@@ -130,15 +146,21 @@ class TimeFrame(wx.Frame):
         if root is None:
             return
 
-        self.results.SetValue("Scanning project...\n")
+        # Clear previous results and show progress message
+        self.results_list.DeleteAllItems()
+        self.details.SetValue("Scanning project...\n")
         wx.GetApp().Yield()  # allow UI to refresh while scanning
 
         findings = scan_project(root)
         self.display_results(findings)
 
     def display_results(self, findings: List[Vulnerability]):
+        # Store current findings for selection handling
+        self._current_findings = []
+        self.results_list.DeleteAllItems()
+
         if not findings:
-            self.results.SetValue("No potential vulnerabilities found.\n")
+            self.details.SetValue("No potential vulnerabilities found.\n")
             return
 
         # Sort by severity (high > medium > low), then by file and line
@@ -153,26 +175,46 @@ class TimeFrame(wx.Frame):
             )
 
         findings_sorted = sorted(findings, key=sort_key)
-
-        lines: List[str] = []
-        lines.append(f"Found {len(findings_sorted)} potential issue(s):")
-        lines.append("")
-
-        header = f"{'SEVERITY':8} {'LANG':8} {'RULE':8} LOCATION"
-        lines.append(header)
-        lines.append("-" * len(header))
+        self._current_findings = findings_sorted
 
         for v in findings_sorted:
-            location = f"{v.file_path}:{v.line}"
-            lines.append(
-                f"{v.severity.upper():8} {v.language:8} {v.rule_id:8} {location}"
+            index = self.results_list.InsertItem(
+                self.results_list.GetItemCount(), v.severity.upper()
             )
-            lines.append(f"  {v.description}")
-            if v.code:
-                lines.append(f"  > {v.code.strip()}")
-            lines.append("")
+            self.results_list.SetItem(index, 1, v.language)
+            self.results_list.SetItem(index, 2, v.rule_id)
+            self.results_list.SetItem(index, 3, v.file_path)
+            self.results_list.SetItem(index, 4, str(v.line))
 
-        self.results.SetValue("\n".join(lines))
+        # Show details for the first finding by default
+        self.details.SetValue("")
+        if findings_sorted:
+            self.results_list.Select(0)
+            self.show_details_for_index(0)
+
+    def on_result_selected(self, event):
+        index = event.GetIndex()
+        self.show_details_for_index(index)
+
+    def show_details_for_index(self, index: int):
+        if index < 0 or index >= len(self._current_findings):
+            self.details.SetValue("")
+            return
+
+        v = self._current_findings[index]
+        lines: List[str] = []
+        lines.append(f"Severity : {v.severity.upper()}")
+        lines.append(f"Language : {v.language}")
+        lines.append(f"Rule     : {v.rule_id}")
+        lines.append(f"Location : {v.file_path}:{v.line}")
+        lines.append("")
+        lines.append(v.description)
+        if v.code:
+            lines.append("")
+            lines.append("Code:")
+            lines.append(v.code.strip())
+
+        self.details.SetValue("\n".join(lines))
 
 
 if __name__ == "__main__":
