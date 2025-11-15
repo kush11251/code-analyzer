@@ -1,8 +1,5 @@
-"""
-Detectors package initialization.
-"""
-from detectors.language_detector import LanguageDetector
-from detectors.rule_engine import BaseRule, RuleEngine
-from detectors.ai_engine import AIEngine
+"""Detector package for static code analysis.
 
-__all__ = ['LanguageDetector', 'BaseRule', 'RuleEngine', 'AIEngine']
+This package currently exposes a simple multi-language vulnerability
+scanner used by the top-level code_analyzer.py CLI.
+"""
